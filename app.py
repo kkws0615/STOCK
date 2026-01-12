@@ -6,7 +6,7 @@ import pandas as pd
 st.set_page_config(page_title="台股 ETF 配息神算", layout="wide")
 st.title("📈 台股 ETF 配息排行 & 存股計算機")
 
-# --- 內建 ETF 資料庫 (代號: 中文名) ---
+# --- 內建 ETF 資料庫 ---
 ETF_DB = {
     "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息", "00929.TW": "復華台灣科技優息",
     "00919.TW": "群益台灣精選高息", "00940.TW": "元大台灣價值高息", "00939.TW": "統一台灣高息動能", "006208.TW": "富邦台50",
@@ -47,20 +47,17 @@ def get_batch_data(ticker_dict):
             if price is None or price == 0:
                 continue
 
-            # 抓取配息
+            # 配息處理
             divs = stock.dividends
             history_str = "無配息"
             total_annual_div = 0
             
             if not divs.empty:
-                # 只算過去 365 天
                 one_year_ago = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
                 last_year_divs = divs[divs.index > one_year_ago]
                 
-                # 計算總和
                 total_annual_div = last_year_divs.sum()
                 
-                # 生成配息明細字串 (由舊到新排序)
                 if not last_year_divs.empty:
                     # 判斷頻率
                     count = len(last_year_divs)
@@ -69,21 +66,20 @@ def get_batch_data(ticker_dict):
                     elif count == 2: freq_tag = "半"
                     else: freq_tag = "年"
                     
-                    # 格式化金額 0.2/0.2/...
+                    # 格式化金額
                     vals = [f"{x:.2f}".rstrip('0').rstrip('.') for x in last_year_divs.tolist()]
                     history_str = f"{freq_tag}: {'/'.join(vals)}"
 
-            # 計算
-            price_per_sheet = price * 1000
+            # 計算數據
             div_per_sheet_year = total_annual_div * 1000
             avg_monthly_income_sheet = div_per_sheet_year / 12
             yield_rate = (total_annual_div / price) * 100 if price > 0 else 0
 
-            # 為了讓代號變成連結，這裡存入完整的 URL
-            yahoo_url = f"https://tw.stock.yahoo.com/quote/{ticker.replace('.TW', '')}"
+            # 產生完整的 Yahoo 網址
+            yahoo_url = f"https://tw.stock.yahoo.com/quote/{ticker}"
 
             data.append({
-                "代號": yahoo_url, # 這裡存網址，但在 config 設定顯示代號
+                "代號": yahoo_url, # 實際值是網址
                 "名稱": name,
                 "配息明細 (近1年)": history_str,
                 "現價 (元)": price,
@@ -103,19 +99,34 @@ tab1, tab2 = st.tabs(["🏆 前 100 高配息排行", "💰 存股計算機 (以
 
 # === 第一區塊：排行 ===
 with tab1:
-    st.info("💡 點擊「代號」可直接前往 Yahoo 股市。")
+    # 移除原本的 st.info，改為直接放按鈕
     if st.button("🔄 開始掃描並更新排行"):
         df = get_batch_data(ETF_DB)
         
         if not df.empty:
             sorted_df = df.sort_values(by="等值月配息 (每張)", ascending=False).head(100).reset_index(drop=True)
             
+            # --- 新增：篩選功能 ---
+            st.write("###") # 增加一點間距
+            search_term = st.text_input("🔍 關鍵字篩選 (輸入名稱或代號，例如: 元大)", "")
+            
+            if search_term:
+                # 篩選邏輯：名稱包含 或是 代號(網址字串)包含 關鍵字
+                # case=False 代表不分大小寫
+                filtered_df = sorted_df[
+                    sorted_df["名稱"].str.contains(search_term, case=False) | 
+                    sorted_df["代號"].str.contains(search_term, case=False)
+                ]
+            else:
+                filtered_df = sorted_df
+
+            # 顯示表格 (使用 filtered_df)
             st.dataframe(
-                sorted_df,
+                filtered_df,
                 column_config={
                     "代號": st.column_config.LinkColumn(
                         "代號", 
-                        display_text=r"quote/([0-9A-Za-z]+\.TW)", # 正則表達式：只顯示網址最後的代號
+                        display_text=r"quote/(.*)", 
                         help="點擊前往 Yahoo 股市" 
                     ),
                     "配息明細 (近1年)": st.column_config.TextColumn(
@@ -131,7 +142,7 @@ with tab1:
                 },
                 use_container_width=True,
                 hide_index=True,
-                height=800  # 設定高度，讓表格變長，視窗變大
+                height=800 
             )
         else:
             st.error("無法獲取資料，請稍後再試")
