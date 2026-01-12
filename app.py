@@ -7,7 +7,6 @@ st.set_page_config(page_title="台股 ETF 配息神算", layout="wide")
 st.title("📈 台股 ETF 配息排行 & 存股計算機")
 
 # --- 內建 ETF 資料庫 (代號: 中文名) ---
-# 這裡列出了市場上熱門的 ETF，你可以隨時手動增加
 ETF_DB = {
     "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息", "00929.TW": "復華台灣科技優息",
     "00919.TW": "群益台灣精選高息", "00940.TW": "元大台灣價值高息", "00939.TW": "統一台灣高息動能", "006208.TW": "富邦台50",
@@ -23,27 +22,23 @@ ETF_DB = {
     "00936.TW": "台新永續高息中小"
 }
 
-# 轉成選單用的列表
 etf_options = [f"{code} {name}" for code, name in ETF_DB.items()]
 
 # --- 核心函數 ---
-@st.cache_data(ttl=3600) # 設定快取 1 小時，避免一直重複抓
+@st.cache_data(ttl=3600)
 def get_batch_data(ticker_dict):
     data = []
-    # 建立進度條
     progress_bar = st.progress(0)
     status_text = st.empty()
     total = len(ticker_dict)
     
     for i, (ticker, name) in enumerate(ticker_dict.items()):
-        # 更新進度
         progress = (i + 1) / total
         progress_bar.progress(progress)
         status_text.text(f"正在分析: {name} ({ticker})...")
         
         try:
             stock = yf.Ticker(ticker)
-            # 抓取價格 (若無市價則用收盤價)
             price = stock.fast_info.last_price
             if price is None:
                 info = stock.info
@@ -54,31 +49,46 @@ def get_batch_data(ticker_dict):
 
             # 抓取配息
             divs = stock.dividends
-            if divs.empty:
-                total_annual_div = 0
-            else:
+            history_str = "無配息"
+            total_annual_div = 0
+            
+            if not divs.empty:
                 # 只算過去 365 天
                 one_year_ago = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
                 last_year_divs = divs[divs.index > one_year_ago]
+                
+                # 計算總和
                 total_annual_div = last_year_divs.sum()
+                
+                # 生成配息明細字串 (由舊到新排序)
+                if not last_year_divs.empty:
+                    # 判斷頻率
+                    count = len(last_year_divs)
+                    if count >= 10: freq_tag = "月"
+                    elif count >= 3: freq_tag = "季"
+                    elif count == 2: freq_tag = "半"
+                    else: freq_tag = "年"
+                    
+                    # 格式化金額 0.2/0.2/...
+                    vals = [f"{x:.2f}".rstrip('0').rstrip('.') for x in last_year_divs.tolist()]
+                    history_str = f"{freq_tag}: {'/'.join(vals)}"
 
-            # 計算 (全部換算成「張」= 1000股)
-            price_per_sheet = price * 1000           # 一張的價格
-            div_per_sheet_year = total_annual_div * 1000 # 一張一年領多少
-            avg_monthly_income_sheet = div_per_sheet_year / 12 # 一張一個月領多少
-            yield_rate = (total_annual_div / price) * 100 # 殖利率
+            # 計算
+            price_per_sheet = price * 1000
+            div_per_sheet_year = total_annual_div * 1000
+            avg_monthly_income_sheet = div_per_sheet_year / 12
+            yield_rate = (total_annual_div / price) * 100 if price > 0 else 0
 
-            # 建立 Yahoo 股市連結
-            yahoo_link = f"https://tw.stock.yahoo.com/quote/{ticker.replace('.TW', '')}"
+            # 為了讓代號變成連結，這裡存入完整的 URL
+            yahoo_url = f"https://tw.stock.yahoo.com/quote/{ticker.replace('.TW', '')}"
 
             data.append({
-                "代號": ticker,
+                "代號": yahoo_url, # 這裡存網址，但在 config 設定顯示代號
                 "名稱": name,
-                "連結": yahoo_link, # 隱藏欄位，用於點擊
+                "配息明細 (近1年)": history_str,
                 "現價 (元)": price,
-                "一張價格": int(price_per_sheet),
                 "近一年配息 (每張)": int(div_per_sheet_year),
-                "等值月配息 (每張)": int(avg_monthly_income_sheet), # 排序依據
+                "等值月配息 (每張)": int(avg_monthly_income_sheet),
                 "年殖利率 (%)": yield_rate
             })
         except Exception as e:
@@ -93,26 +103,26 @@ tab1, tab2 = st.tabs(["🏆 前 100 高配息排行", "💰 存股計算機 (以
 
 # === 第一區塊：排行 ===
 with tab1:
-    st.info("💡 這裡只列出系統內建的熱門 ETF，資料更新可能會有延遲。")
-    
+    st.info("💡 點擊「代號」可直接前往 Yahoo 股市。")
     if st.button("🔄 開始掃描並更新排行"):
         df = get_batch_data(ETF_DB)
         
         if not df.empty:
-            # 1. 排序：依照「等值月配息」降序
             sorted_df = df.sort_values(by="等值月配息 (每張)", ascending=False).head(100).reset_index(drop=True)
             
-            # 2. 顯示表格
             st.dataframe(
                 sorted_df,
                 column_config={
-                    "連結": st.column_config.LinkColumn(
-                        "詳細資訊", 
-                        help="點擊前往 Yahoo 股市",
-                        display_text="前往 Yahoo 股市"
+                    "代號": st.column_config.LinkColumn(
+                        "代號", 
+                        display_text=r"quote/([0-9A-Za-z]+\.TW)", # 正則表達式：只顯示網址最後的代號
+                        help="點擊前往 Yahoo 股市" 
+                    ),
+                    "配息明細 (近1年)": st.column_config.TextColumn(
+                        "近1年配息明細 (元/股)",
+                        width="medium"
                     ),
                     "現價 (元)": st.column_config.NumberColumn(format="$ %.2f"),
-                    "一張價格": st.column_config.NumberColumn(format="$ %d"),
                     "近一年配息 (每張)": st.column_config.NumberColumn(format="$ %d"),
                     "等值月配息 (每張)": st.column_config.NumberColumn(format="$ %d"),
                     "年殖利率 (%)": st.column_config.ProgressColumn(
@@ -120,7 +130,8 @@ with tab1:
                     ),
                 },
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                height=800  # 設定高度，讓表格變長，視窗變大
             )
         else:
             st.error("無法獲取資料，請稍後再試")
@@ -130,26 +141,19 @@ with tab1:
 # === 第二區塊：計算機 ===
 with tab2:
     st.header("每「張」股票配息試算")
-    
     col1, col2 = st.columns(2)
     
     with col1:
-        # 1. 搜尋欄位 (使用 selectbox 達到搜尋效果)
         selected_option = st.selectbox("🔍 搜尋並選擇 ETF/股票", etf_options)
-        
-        # 解析選到的代號
         if selected_option:
-            ticker = selected_option.split(" ")[0] # 取出 0050.TW
-            name = selected_option.split(" ")[1]   # 取出 元大台灣50
-            
-            # 即時抓取單檔資料
+            ticker = selected_option.split(" ")[0]
+            name = selected_option.split(" ")[1]
             stock = yf.Ticker(ticker)
             price = stock.fast_info.last_price
-            if price is None: # 容錯
+            if price is None:
                  info = stock.info
                  price = info.get('currentPrice', info.get('previousClose', 0))
             
-            # 抓配息
             divs = stock.dividends
             if not divs.empty:
                 one_year_ago = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
@@ -157,7 +161,6 @@ with tab2:
             else:
                 annual_div_share = 0
 
-            # 顯示單張數據
             price_per_sheet = price * 1000
             monthly_income_per_sheet = (annual_div_share * 1000) / 12
             
@@ -168,17 +171,10 @@ with tab2:
             st.metric("平均每張每月可領", f"${int(monthly_income_per_sheet):,}")
 
     with col2:
-        # 輸入資金
         investment_amount = st.number_input("💰 預計投入金額 (台幣)", value=100000, step=10000)
-        
         if selected_option and price > 0:
-            # 計算可買「張」數 (整數)
             sheets_can_buy = int(investment_amount / price_per_sheet)
-            
-            # 剩餘零股
             remainder_money = investment_amount - (sheets_can_buy * price_per_sheet)
-            
-            # 總月領
             total_monthly_income = sheets_can_buy * monthly_income_per_sheet
             
             st.divider()
@@ -188,5 +184,4 @@ with tab2:
                 st.info(f"預估每月總共可領: **NT$ {int(total_monthly_income):,}** 元")
             else:
                 st.warning("資金不足以買進一張")
-            
             st.caption(f"剩餘資金: ${int(remainder_money):,} (不足一張)")
