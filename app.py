@@ -1,85 +1,60 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import requests
-import urllib3
 
 # --- 設定頁面 ---
-st.set_page_config(page_title="台股 ETF 全市場配息神算", layout="wide")
-st.title("📈 台股全市場 ETF 配息排行 & 存股計算機")
+st.set_page_config(page_title="台股 ETF 百大配息榜", layout="wide")
+st.title("📈 台股百大熱門 ETF 配息排行 & 存股計算機")
 
 # --- 初始化 Session State ---
 if 'stock_df' not in st.session_state:
     st.session_state.stock_df = pd.DataFrame()
-if 'etf_list' not in st.session_state:
-    st.session_state.etf_list = {}
 
-# --- 擴充版備用清單 (萬一爬蟲失敗，至少有這些) ---
-FALLBACK_ETFS = {
-    "0050.TW": "元大台灣50", "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息", "00929.TW": "復華台灣科技優息",
-    "00919.TW": "群益台灣精選高息", "00940.TW": "元大台灣價值高息", "00939.TW": "統一台灣高息動能", "006208.TW": "富邦台50",
-    "00713.TW": "元大台灣高息低波", "00900.TW": "富邦特選高股息30", "00881.TW": "國泰台灣5G+", "00692.TW": "富邦公司治理",
-    "0051.TW": "元大中型100", "0052.TW": "富邦科技", "00631L.TW": "元大台灣50正2", "00632R.TW": "元大台灣50反1",
-    "00679B.TW": "元大美債20年", "00687B.TW": "國泰20年美債", "00937B.TW": "群益ESG投等債20+", "00751B.TW": "元大AAA至A公司債",
-    "00720B.TW": "元大投資級公司債", "00725B.TW": "國泰投資級公司債", "00850.TW": "元大臺灣ESG永續", "00923.TW": "群益台灣ESG低碳",
-    "0053.TW": "元大電子", "0055.TW": "元大MSCI金融", "0057.TW": "富邦摩台", "006203.TW": "元大MSCI台灣",
-    "006204.TW": "永豐臺灣加權", "00662.TW": "富邦NASDAQ", "00646.TW": "元大S&P500", "00830.TW": "國泰費城半導體",
-    "00891.TW": "中信關鍵半導體", "00892.TW": "富邦台灣半導體", "00893.TW": "國泰智能電動車", "00895.TW": "富邦未來車",
-    "00905.TW": "FT臺灣Smart", "00918.TW": "大華優利高填息30", "00915.TW": "凱基優選高股息30", "00922.TW": "國泰台灣領袖50",
-    "00927.TW": "群益半導體收益", "00932.TW": "兆豐永續高息等權", "00934.TW": "中信成長高股息", "00935.TW": "野村臺灣新科技50",
-    "00936.TW": "台新永續高息中小", "00944.TW": "野村趨勢動能高息", "00946.TW": "群益科技高息成長", "00943.TW": "兆豐電子高息等權",
-    "00941.TW": "中信上游半導體", "00921.TW": "兆豐龍頭等權", "00690.TW": "兆豐臺灣藍籌30", "00701.TW": "國泰股利精選30",
-    "00730.TW": "富邦臺灣優質高息", "00731.TW": "復華富時高息低波", "00907.TW": "永豐優息存股"
+# --- 內建：台股百大熱門 ETF 資料庫 (手動維護最穩定) ---
+# 包含：市值型、高股息、科技主題、債券、海外、槓桿反向
+ETF_DB = {
+    # === 高股息 / 配息型 ===
+    "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息", "00929.TW": "復華台灣科技優息", 
+    "00919.TW": "群益台灣精選高息", "00940.TW": "元大台灣價值高息", "00939.TW": "統一台灣高息動能",
+    "00713.TW": "元大台灣高息低波", "00900.TW": "富邦特選高股息30", "00915.TW": "凱基優選高股息30",
+    "00918.TW": "大華優利高填息30", "00934.TW": "中信成長高股息", "00936.TW": "台新永續高息中小",
+    "00944.TW": "野村趨勢動能高息", "00946.TW": "群益科技高息成長", "00943.TW": "兆豐電子高息等權",
+    "00701.TW": "國泰股利精選30", "00731.TW": "復華富時高息低波", "00690.TW": "兆豐臺灣藍籌30",
+    "00730.TW": "富邦臺灣優質高息", "00907.TW": "永豐優息存股", "00932.TW": "兆豐永續高息等權",
+    "00927.TW": "群益半導體收益",
+    
+    # === 市值型 / 大盤 ===
+    "0050.TW": "元大台灣50", "006208.TW": "富邦台50", "00692.TW": "富邦公司治理", 
+    "00922.TW": "國泰台灣領袖50", "00923.TW": "群益台灣ESG低碳", "00850.TW": "元大臺灣ESG永續",
+    "0051.TW": "元大中型100", "006204.TW": "永豐臺灣加權", "0057.TW": "富邦摩台",
+    "006203.TW": "元大MSCI台灣", "00921.TW": "兆豐龍頭等權", "00905.TW": "FT臺灣Smart",
+
+    # === 科技 / 半導體 / 主題 ===
+    "0052.TW": "富邦科技", "0053.TW": "元大電子", "00881.TW": "國泰台灣5G+",
+    "00891.TW": "中信關鍵半導體", "00892.TW": "富邦台灣半導體", "00830.TW": "國泰費城半導體",
+    "00935.TW": "野村臺灣新科技50", "00941.TW": "中信上游半導體", "00893.TW": "國泰智能電動車",
+    "00895.TW": "富邦未來車", "00901.TW": "永豐智能車供應鏈", "00733.TW": "富邦臺灣中小",
+    "0055.TW": "元大MSCI金融", "00938.TW": "凱基優選30",
+    
+    # === 債券 ETF (美債、投等債) ===
+    "00679B.TW": "元大美債20年", "00687B.TW": "國泰20年美債", "00937B.TW": "群益ESG投等債20+",
+    "00933B.TW": "國泰10Y+金融債", "00720B.TW": "元大投資級公司債", "00725B.TW": "國泰投資級公司債",
+    "00751B.TW": "元大AAA至A公司債", "00772B.TW": "中信高評級公司債", "00795B.TW": "中信美國公債20年",
+    "00680L.TW": "元大美債20正2", "00688L.TW": "國泰20年美債正2", "00857B.TW": "永豐20年美債",
+    "00724B.TW": "群益10年IG金融債", "00746B.TW": "富邦A級公司債", "00740B.TW": "富邦全球投等債",
+
+    # === 海外 / 美股 / 其他 ===
+    "00662.TW": "富邦NASDAQ", "00646.TW": "元大S&P500", "00757.TW": "統一FANG+",
+    "006205.TW": "富邦上証", "0061.TW": "元大寶滬深", "00636.TW": "國泰中國A50",
+    "00882.TW": "中信中國高股息", "00885.TW": "富邦越南", "00909.TW": "國泰數位支付服務",
+    "00861.TW": "元大全球未來通訊", "00762.TW": "元大全球AI", "00851.TW": "台新全球AI",
+    
+    # === 槓桿 / 反向 (交易量大) ===
+    "00631L.TW": "元大台灣50正2", "00632R.TW": "元大台灣50反1", "00673R.TW": "元大SP500反1",
+    "00650L.TW": "復華香港正2", "00655L.TW": "國泰中國A50正2"
 }
 
-# --- 核心函數：抓取全台 ETF 清單 (爬蟲) ---
-@st.cache_data(ttl=86400)
-def fetch_tw_etfs():
-    # 忽略 SSL 警告
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    
-    try:
-        url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
-        
-        # 修正 1: 加入 User-Agent 偽裝成瀏覽器
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        
-        # 修正 2: 設定 timeout 避免卡死
-        res = requests.get(url, headers=headers, verify=False, timeout=10)
-        
-        # 讀取 HTML
-        dfs = pd.read_html(res.text)
-        df = dfs[0]
-        
-        # 整理資料
-        df.columns = df.iloc[0]
-        df = df.iloc[1:]
-        
-        # 篩選 ETF
-        target_df = df[df['有價證券別'] == 'ETF']
-        
-        etf_dict = {}
-        for index, row in target_df.iterrows():
-            code_name = row['有價證券代號及名稱']
-            if " " in code_name:
-                code, name = code_name.split(" ", 1)
-                etf_dict[f"{code}.TW"] = name
-            elif "\u3000" in code_name:
-                code, name = code_name.split("\u3000", 1)
-                etf_dict[f"{code}.TW"] = name
-        
-        # 如果抓到的數量太少(例如被擋只抓到空殼)，就拋出錯誤用備用清單
-        if len(etf_dict) < 10:
-            raise ValueError("抓取數量異常")
-            
-        return etf_dict
-
-    except Exception as e:
-        # 這裡會靜默失敗，回傳備用清單，但我們會在介面上顯示警告
-        print(f"爬蟲失敗: {e}")
-        return FALLBACK_ETFS
+etf_options = [f"{code} {name}" for code, name in ETF_DB.items()]
 
 # --- 核心函數：抓取股價與配息 ---
 def get_batch_data(ticker_dict):
@@ -151,48 +126,22 @@ def get_batch_data(ticker_dict):
     status_text.empty()
     return pd.DataFrame(data)
 
-# --- 側邊欄：工具區 ---
-with st.sidebar:
-    st.header("⚙️ 設定")
-    if st.button("🗑️ 清除快取 (重置資料)"):
-        st.cache_data.clear()
-        if 'stock_df' in st.session_state:
-            del st.session_state['stock_df']
-        if 'etf_list' in st.session_state:
-            del st.session_state['etf_list']
-        st.rerun()
-
-# --- 主程式邏輯 ---
-if not st.session_state.etf_list:
-    with st.spinner("正在連線證交所更新最新 ETF 清單..."):
-        st.session_state.etf_list = fetch_tw_etfs()
-
-# 檢查是否使用了備用清單
-is_fallback = len(st.session_state.etf_list) == len(FALLBACK_ETFS)
-list_count = len(st.session_state.etf_list)
-
-etf_options = [f"{code} {name}" for code, name in st.session_state.etf_list.items()]
-
 # --- 介面佈局 ---
-tab1, tab2 = st.tabs(["🏆 全台 ETF 配息排行", "💰 存股計算機 (以張為單位)"])
+tab1, tab2 = st.tabs(["🏆 百大 ETF 排行榜", "💰 存股計算機 (以張為單位)"])
 
 # === 第一區塊：排行 ===
 with tab1:
-    col_btn, col_count = st.columns([1, 4])
+    col_btn, col_info = st.columns([1, 4])
     with col_btn:
-        if st.button("🚀 開始掃描全市場"):
-            st.toast(f"開始掃描 {list_count} 檔 ETF，請耐心等候...", icon="⏳")
-            df = get_batch_data(st.session_state.etf_list)
+        if st.button("🚀 開始掃描 (約1分鐘)"):
+            df = get_batch_data(ETF_DB)
             if not df.empty:
                 st.session_state.stock_df = df.sort_values(by="等值月配息 (每張)", ascending=False).reset_index(drop=True)
             else:
                 st.error("掃描失敗，請稍後再試")
     
-    with col_count:
-        if is_fallback:
-            st.warning(f"⚠️ 證交所連線不穩，目前使用內建熱門清單 (共 {list_count} 檔)。")
-        else:
-            st.success(f"✅ 已成功連線證交所，目前資料庫共有 {list_count} 檔上市 ETF")
+    with col_info:
+        st.write(f"目前內建熱門 ETF 清單：共 **{len(ETF_DB)}** 檔")
 
     # 顯示搜尋與表格
     if not st.session_state.stock_df.empty:
@@ -230,7 +179,7 @@ with tab1:
             height=800 
         )
     else:
-        st.info("👆 請點擊上方按鈕開始掃描")
+        st.info("👆 請點擊上方按鈕開始載入資料 (內建百大熱門名單，無需連線證交所)")
 
 # === 第二區塊：計算機 ===
 with tab2:
