@@ -19,7 +19,8 @@ def fetch_tw_etfs():
     try:
         # 來源：台灣證券交易所 本國上市證券國際證券辨識號碼一覽表
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
-        res = requests.get(url)
+        # verify=False 代表忽略 SSL 憑證驗證
+        res = requests.get(url, verify=False)
         # 讀取 HTML 表格
         dfs = pd.read_html(res.text)
         df = dfs[0]
